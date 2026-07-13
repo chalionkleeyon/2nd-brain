@@ -1,0 +1,327 @@
+/* ── Reset & Base ─────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  line-height: 1.6;
+}
+
+/* ── Skeleton Loading ────────────────────────────────── */
+.timeline-skeleton {
+  height: 72px;
+  background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: 16px;
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* ── Timeline Event Cards ────────────────────────────── */
+.event-card {
+  background: #ffffff;
+  border: 1px solid #e9ecef;
+  border-radius: 16px;
+  padding: 16px 20px;
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.event-card:hover {
+  border-color: #dee2e6;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+.event-time {
+  min-width: 64px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #6c757d;
+  padding-top: 2px;
+  white-space: nowrap;
+}
+
+.event-body { flex: 1; min-width: 0; }
+
+.event-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #212529;
+  line-height: 1.4;
+}
+
+.event-meta {
+  font-size: 12px;
+  color: #6c757d;
+  margin-top: 2px;
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.event-calendar-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+  margin-top: 7px;
+}
+
+.event-now {
+  border-left: 3px solid #6c5ce7;
+  background: #f8f7ff;
+}
+
+.event-past { opacity: 0.5; }
+
+/* ── Time Marker ─────────────────────────────────────── */
+.now-marker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.now-marker::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  background: #e63946;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.now-marker::after {
+  content: '';
+  flex: 1;
+  height: 2px;
+  background: #e63946;
+  opacity: 0.3;
+}
+
+.now-marker-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #e63946;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+
+/* ── Action Item Cards ───────────────────────────────── */
+.action-card {
+  background: #ffffff;
+  border: 1px solid #e9ecef;
+  border-radius: 16px;
+  padding: 16px 20px;
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.action-card:hover {
+  border-color: #dee2e6;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+.action-card-urgent {
+  border-left: 3px solid #e63946;
+}
+
+.action-card-pending {
+  border-left: 3px solid #f4a261;
+}
+
+.action-card-info {
+  border-left: 3px solid #457b9d;
+}
+
+.action-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.action-subject {
+  font-size: 14px;
+  font-weight: 600;
+  color: #212529;
+  line-height: 1.4;
+}
+
+.action-from {
+  font-size: 12px;
+  color: #6c757d;
+  margin-top: 2px;
+}
+
+.action-items-list {
+  margin-top: 10px;
+  padding-left: 0;
+  list-style: none;
+}
+
+.action-items-list li {
+  font-size: 13px;
+  color: #495057;
+  padding: 4px 0;
+  padding-left: 20px;
+  position: relative;
+}
+
+.action-items-list li::before {
+  content: '→';
+  position: absolute;
+  left: 0;
+  color: #6c5ce7;
+  font-weight: 700;
+}
+
+.action-due {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #e63946;
+  background: #fef2f2;
+  padding: 2px 8px;
+  border-radius: 6px;
+  margin-top: 8px;
+}
+
+.action-btn {
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 10px;
+  border: none;
+  cursor: pointer;
+  transition: background 0.15s ease;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.action-btn-draft {
+  background: #6c5ce7;
+  color: #ffffff;
+}
+
+.action-btn-draft:hover { background: #5a4bd1; }
+
+.action-btn-done {
+  background: #e9ecef;
+  color: #6c757d;
+}
+
+.action-btn-done:hover { background: #dee2e6; }
+
+/* ── Sync Button Animation ───────────────────────────── */
+.sync-spinning #sync-icon {
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* ── Toast Notifications ─────────────────────────────── */
+.toast {
+  padding: 12px 20px;
+  border-radius: 14px;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  animation: toast-in 0.3s ease;
+  max-width: 360px;
+  text-align: center;
+}
+
+.toast-success { background: #2a9d8f; color: white; }
+.toast-error { background: #e63946; color: white; }
+.toast-info { background: #457b9d; color: white; }
+
+@keyframes toast-in {
+  from { transform: translateY(16px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+/* ── All-day event badge ─────────────────────────────── */
+.all-day-badge {
+  font-size: 11px;
+  font-weight: 600;
+  color: #6c5ce7;
+  background: #ededfc;
+  padding: 1px 8px;
+  border-radius: 6px;
+}
+
+/* ── Checkbox for tasks ──────────────────────────────── */
+.task-check {
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  border: 2px solid #dee2e6;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
+  margin-top: 2px;
+  background: transparent;
+}
+
+.task-check:hover {
+  border-color: #6c5ce7;
+  background: #f8f7ff;
+}
+
+.task-check.checked {
+  background: #2a9d8f;
+  border-color: #2a9d8f;
+}
+
+.task-check.checked::after {
+  content: '✓';
+  color: white;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/* ── Section Divider ─────────────────────────────────── */
+.section-divider {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #adb5bd;
+  padding: 16px 0 8px;
+}
+
+/* ── Responsive ──────────────────────────────────────── */
+@media (max-width: 640px) {
+  .event-card { padding: 12px 16px; gap: 12px; }
+  .event-time { min-width: 52px; font-size: 12px; }
+  .event-title { font-size: 14px; }
+  .action-card { padding: 12px 16px; }
+}
+
+/* ── Focus States ────────────────────────────────────── */
+button:focus-visible, input:focus-visible, textarea:focus-visible {
+  outline: 2px solid #6c5ce7;
+  outline-offset: 2px;
+}
+
+/* ── Scrollbar ───────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #dee2e6; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #adb5bd; }
