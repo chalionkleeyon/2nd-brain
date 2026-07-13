@@ -1,10 +1,12 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-const CLAUDE_API_KEY = Deno.env.get("CLAUDE_API_KEY")!;
+const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY")!;
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const GOOGLE_CLIENT_ID = Deno.env.get("GOOGLE_CLIENT_ID")!;
 const GOOGLE_CLIENT_SECRET = Deno.env.get("GOOGLE_CLIENT_SECRET")!;
+
+const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
 
 const CALENDAR_IDS = [
   "mlmease@gmail.com",
@@ -113,7 +115,7 @@ async function fetchRecentEmails(token: string): Promise<any[]> {
   });
 }
 
-async function processWithClaude(emails: any[]): Promise<any[]> {
+async function processWithGemini(emails: any[]): Promise<any[]> {
   if (!emails.length) return [];
 
   const emailList = emails
@@ -123,27 +125,19 @@ async function processWithClaude(emails: any[]): Promise<any[]> {
     )
     .join("\n\n");
 
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
+  const prompt = `Analyze these emails and extract actionable items. Return ONLY a JSON array of objects with: emailIndex (1-based), subject, from, date, priority ("urgent"|"pending"|"info"), actions (string[]), dueDate (string|null). Skip promotional/automated emails. Only include emails needing MY action.\n\nEmails:\n${emailList}`;
+
+  const res = await fetch(GEMINI_URL, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": CLAUDE_API_KEY,
-      "anthropic-version": "2023-06-01",
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 2000,
-      messages: [
-        {
-          role: "user",
-          content: `Analyze these emails and extract actionable items. Return ONLY a JSON array of objects with: emailIndex (1-based), subject, from, date, priority ("urgent"|"pending"|"info"), actions (string[]), dueDate (string|null). Skip promotional/automated emails. Only include emails needing MY action.\n\nEmails:\n${emailList}`,
-        },
-      ],
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { maxOutputTokens: 2000, temperature: 0.2 },
     }),
   });
 
   const data = await res.json();
-  const text = data.content?.[0]?.text || "[]";
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "[]";
   try {
     const match = text.match(/\[[\s\S]*\]/);
     const parsed = JSON.parse(match ? match[0] : "[]");
@@ -182,74 +176,61 @@ Deno.serve(async (req) => {
       auth: { persistSession: false },
     });
 
-    // Get all users who signed in with Google
-    const { data: identities } = await sb
-      .from("auth.identities")
-      .select("user_id, identity_data")
-      .eq("provider", "google");
+    const {
+      data: { users: allUsers },
+    } = await sb.auth.admin.listUsers();
 
-    // Fallback: query auth.users directly via SQL for refresh tokens
-    const { data: users } = await sb.rpc("get_google_users");
+    const googleUsers =
+      allUsers?.filter((u) =>
+        u.identities?.some((id) => id.provider === "google")
+      ) || [];
 
-    if (!users?.length) {
-      // If RPC not set up, try direct approach
-      const {
-        data: { users: allUsers },
-      } = await sb.auth.admin.listUsers();
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
 
-      const googleUsers =
-        allUsers?.filter((u) =>
-          u.identities?.some((id) => id.provider === "google")
-        ) || [];
+    for (const user of googleUsers) {
+      const identity = user.identities?.find(
+        (id) => id.provider === "google"
+      );
+      if (!identity) continue;
 
-      const tomorrow = new Date();
-      tomorrow.setDate(tomorrow.getDate() + 1);
+      const refreshToken =
+        (user.user_metadata as any)?.provider_refresh_token ||
+        (identity.identity_data as any)?.provider_refresh_token;
 
-      for (const user of googleUsers) {
-        const identity = user.identities?.find(
-          (id) => id.provider === "google"
-        );
-        if (!identity) continue;
-
-        // Get refresh token from user metadata
-        const refreshToken =
-          (user.user_metadata as any)?.provider_refresh_token ||
-          (identity.identity_data as any)?.provider_refresh_token;
-
-        if (!refreshToken) {
-          console.log(`No refresh token for user ${user.id}`);
-          continue;
-        }
-
-        const accessToken = await refreshGoogleToken(refreshToken);
-        if (!accessToken) {
-          console.log(`Failed to refresh token for user ${user.id}`);
-          continue;
-        }
-
-        const [events, emails] = await Promise.all([
-          fetchCalendarEvents(accessToken, tomorrow),
-          fetchRecentEmails(accessToken),
-        ]);
-
-        const actionItems = await processWithClaude(emails);
-
-        const dateStr = tomorrow.toISOString().split("T")[0];
-        await sb.from("daily_cache").upsert(
-          {
-            user_id: user.id,
-            cache_date: dateStr,
-            calendar_events: events,
-            action_items: actionItems,
-            processed_at: new Date().toISOString(),
-          },
-          { onConflict: "user_id,cache_date" }
-        );
-
-        console.log(
-          `Synced ${events.length} events and ${actionItems.length} actions for user ${user.id}`
-        );
+      if (!refreshToken) {
+        console.log(`No refresh token for user ${user.id}`);
+        continue;
       }
+
+      const accessToken = await refreshGoogleToken(refreshToken);
+      if (!accessToken) {
+        console.log(`Failed to refresh token for user ${user.id}`);
+        continue;
+      }
+
+      const [events, emails] = await Promise.all([
+        fetchCalendarEvents(accessToken, tomorrow),
+        fetchRecentEmails(accessToken),
+      ]);
+
+      const actionItems = await processWithGemini(emails);
+
+      const dateStr = tomorrow.toISOString().split("T")[0];
+      await sb.from("daily_cache").upsert(
+        {
+          user_id: user.id,
+          cache_date: dateStr,
+          calendar_events: events,
+          action_items: actionItems,
+          processed_at: new Date().toISOString(),
+        },
+        { onConflict: "user_id,cache_date" }
+      );
+
+      console.log(
+        `Synced ${events.length} events and ${actionItems.length} actions for user ${user.id}`
+      );
     }
 
     return new Response(

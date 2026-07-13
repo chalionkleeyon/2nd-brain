@@ -1,8 +1,10 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-const CLAUDE_API_KEY = Deno.env.get("CLAUDE_API_KEY")!;
+const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY")!;
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SUPABASE_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+
+const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -50,20 +52,7 @@ Deno.serve(async (req) => {
       )
       .join("\n\n");
 
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": CLAUDE_API_KEY,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 2000,
-        messages: [
-          {
-            role: "user",
-            content: `Analyze these emails and extract actionable items. For each email that needs attention, determine:
+    const prompt = `Analyze these emails and extract actionable items. For each email that needs attention, determine:
 1. Priority: "urgent" (needs reply today, has deadline), "pending" (needs reply soon), or "info" (FYI only)
 2. What specific action is needed
 3. Any due dates mentioned
@@ -82,14 +71,20 @@ Return ONLY valid JSON — an array of objects with these fields:
 - dueDate (string or null)
 
 Emails:
-${emailList}`,
-          },
-        ],
+${emailList}`;
+
+    const response = await fetch(GEMINI_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { maxOutputTokens: 2000, temperature: 0.2 },
       }),
     });
 
-    const claudeData = await response.json();
-    const text = claudeData.content?.[0]?.text || "[]";
+    const geminiData = await response.json();
+    const text =
+      geminiData.candidates?.[0]?.content?.parts?.[0]?.text || "[]";
 
     let parsed;
     try {

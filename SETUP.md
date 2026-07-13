@@ -4,7 +4,7 @@
 
 - A Supabase project (yours: `ntpmkzrnpfrcrniyfhdu`)
 - A Google Cloud project with OAuth 2.0 credentials
-- A Claude API key from [console.anthropic.com](https://console.anthropic.com)
+- A Gemini API key from [aistudio.google.com](https://aistudio.google.com/apikey) (free tier)
 - Supabase CLI installed: `npm install -g supabase`
 
 ---
@@ -18,6 +18,7 @@
 3. Navigate to **APIs & Services → Library** and enable:
    - **Gmail API**
    - **Google Calendar API**
+   - **Generative Language API** (for Gemini — or get a key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey) separately)
 4. Navigate to **APIs & Services → Credentials**
 5. Click **Create Credentials → OAuth 2.0 Client ID**
 6. Application type: **Web application**
@@ -56,7 +57,7 @@
 Run these commands from your terminal:
 
 ```bash
-supabase secrets set CLAUDE_API_KEY=sk-ant-your-key-here
+supabase secrets set GEMINI_API_KEY=your-gemini-api-key
 supabase secrets set GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
 supabase secrets set GOOGLE_CLIENT_SECRET=your-client-secret
 ```
@@ -171,5 +172,5 @@ Row Level Security is enabled:
 | "Session expired" after sign-in | Check that your Google OAuth redirect URI matches exactly |
 | No calendar events | Verify Calendar API is enabled in Google Cloud Console |
 | No email processing | Check Edge Function logs: `supabase functions logs process-emails` |
-| Draft replies empty | Check Claude API key: `supabase functions logs draft-reply` |
+| Draft replies empty | Check Gemini API key: `supabase functions logs draft-reply` |
 | Cron not firing | Run `SELECT * FROM cron.job_run_details ORDER BY start_time DESC LIMIT 5;` |
