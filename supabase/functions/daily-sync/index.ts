@@ -77,7 +77,7 @@ async function fetchCalendarEvents(
 
 async function fetchRecentEmails(token: string): Promise<any[]> {
   const query =
-    "newer_than:14d -category:promotions -category:social -category:updates -category:forums (is:starred OR from:me OR (is:unread to:me))";
+    'newer_than:14d -category:promotions -category:forums (is:starred OR from:me OR (is:unread to:me) OR subject:(receipt OR invoice OR renewal OR subscription OR billing OR statement))';
   const res = await fetch(
     `https://www.googleapis.com/gmail/v1/users/me/threads?q=${encodeURIComponent(query)}&maxResults=30`,
     { headers: { Authorization: `Bearer ${token}` } }
@@ -125,7 +125,7 @@ async function processWithGemini(emails: any[]): Promise<any[]> {
     )
     .join("\n\n");
 
-  const prompt = `Analyze these emails and extract actionable items. Return ONLY a JSON array of objects with: emailIndex (1-based), subject, from, date, priority ("urgent"|"pending"|"info"), actions (string[]), dueDate (string|null). Skip promotional/automated emails. Only include emails needing MY action.\n\nEmails:\n${emailList}`;
+  const prompt = `Analyze these emails (last 14 days) and classify each one that deserves attention into one or more tags: "deadline" (specific date/deadline to act on), "active_thread" (ongoing conversation needing a reply), "billing" (receipt/invoice/subscription renewal), "waste" (only alongside "billing", when there's a price increase, unused subscription, or duplicate service signal — explain briefly in wasteReason). Skip promotional/automated marketing emails.\n\nReturn ONLY a JSON array of objects with: emailIndex (1-based), subject, from, date, tags (string[]), priority ("urgent"|"pending"|"info"), actions (string[]), dueDate (string|null), amount (string|null, e.g. "$14.99/month"), wasteReason (string|null).\n\nEmails:\n${emailList}`;
 
   const res = await fetch(GEMINI_URL, {
     method: "POST",
@@ -153,6 +153,12 @@ async function processWithGemini(emails: any[]): Promise<any[]> {
         priority: item.priority || "info",
         actions: item.actions || [],
         dueDate: item.dueDate || null,
+        amount: item.amount || null,
+        wasteReason: item.wasteReason || null,
+        tags:
+          Array.isArray(item.tags) && item.tags.length
+            ? item.tags
+            : ["active_thread"],
       };
     });
   } catch {

@@ -141,6 +141,16 @@ body {
   border-left: 3px solid #457b9d;
 }
 
+.action-card-billing {
+  border-left: 3px solid #6c5ce7;
+  background: #faf9ff;
+}
+
+.action-card-waste {
+  border-left: 3px solid #d97706;
+  background: #fffbeb;
+}
+
 .action-header {
   display: flex;
   align-items: flex-start;
@@ -221,6 +231,42 @@ body {
 }
 
 .action-btn-done:hover { background: #dee2e6; }
+
+.action-amount {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #6c5ce7;
+  background: #ededfc;
+  padding: 2px 8px;
+  border-radius: 6px;
+  margin-top: 8px;
+}
+
+.action-waste-note {
+  font-size: 12px;
+  color: #b45309;
+  background: #fef3c7;
+  padding: 6px 10px;
+  border-radius: 8px;
+  margin-top: 10px;
+  line-height: 1.4;
+}
+
+/* ── Subsection Headings ─────────────────────────────── */
+.subsection-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+  font-weight: 700;
+  color: #495057;
+  margin: 24px 0 10px;
+}
+
+.subsection-heading:first-of-type { margin-top: 8px; }
 
 /* ── Sync Button Animation ───────────────────────────── */
 .sync-spinning #sync-icon {

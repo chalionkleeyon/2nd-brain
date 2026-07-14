@@ -195,8 +195,9 @@ async function createCalendarEvent(summary, startTime, endTime) {
 async function fetchActionableEmails() {
   const queries = [
     'newer_than:14d is:starred',
-    'newer_than:14d from:me -category:promotions -category:social',
-    'newer_than:14d -category:promotions -category:social -category:updates -category:forums is:unread to:me',
+    'newer_than:14d from:me -category:promotions -category:forums',
+    'newer_than:14d -category:promotions -category:forums is:unread to:me',
+    'newer_than:14d (subject:(receipt OR invoice OR renewal OR subscription OR "payment confirmation" OR "auto-renew" OR statement OR billing) OR label:Receipts)',
   ];
 
   const threadIds = new Set();
@@ -204,7 +205,7 @@ async function fetchActionableEmails() {
 
   for (const q of queries) {
     const res = await googleFetch(
-      `https://www.googleapis.com/gmail/v1/users/me/threads?q=${encodeURIComponent(q)}&maxResults=20`
+      `https://www.googleapis.com/gmail/v1/users/me/threads?q=${encodeURIComponent(q)}&maxResults=25`
     );
     if (!res || !res.ok) continue;
     const data = await res.json();
@@ -217,7 +218,7 @@ async function fetchActionableEmails() {
   }
 
   const detailed = await Promise.all(
-    threads.slice(0, 30).map(async (t) => {
+    threads.slice(0, 35).map(async (t) => {
       const res = await googleFetch(
         `https://www.googleapis.com/gmail/v1/users/me/threads/${t.id}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Date`
       );
@@ -312,19 +313,28 @@ async function processEmailsWithClaude(emails) {
   return res.json();
 }
 
+const BILLING_REGEX = /invoice|receipt|renewal|subscription|payment|billing|statement|auto-renew/i;
+
 function fallbackProcessing(emails) {
   return emails
-    .filter(e => !e.iSentLast || e.isStarred)
-    .map(e => ({
-      threadId: e.threadId,
-      messageId: e.messageId,
-      subject: e.subject,
-      from: e.from,
-      date: e.date,
-      priority: e.isStarred ? 'urgent' : 'pending',
-      actions: [e.snippet.substring(0, 120)],
-      dueDate: null,
-    }));
+    .filter(e => !e.iSentLast || e.isStarred || BILLING_REGEX.test(e.subject))
+    .map(e => {
+      const isBilling = BILLING_REGEX.test(e.subject);
+      const tags = isBilling ? ['billing'] : e.isStarred ? ['deadline'] : ['active_thread'];
+      return {
+        threadId: e.threadId,
+        messageId: e.messageId,
+        subject: e.subject,
+        from: e.from,
+        date: e.date,
+        priority: e.isStarred ? 'urgent' : 'pending',
+        actions: [e.snippet.substring(0, 120)],
+        dueDate: null,
+        amount: null,
+        wasteReason: null,
+        tags,
+      };
+    });
 }
 
 async function generateDraftReply(emailContext) {
@@ -580,13 +590,31 @@ function isEventNow(event) {
   return now >= start && now <= end;
 }
 
-// ─── Render: Action Items ───────────────────────────────────────────────────
-function renderActionItems(items) {
-  const container = document.getElementById('action-list');
-  const empty = document.getElementById('action-empty');
-  const count = document.getElementById('action-count');
+// ─── Render: Inbox Intelligence ─────────────────────────────────────────────
+const CATEGORY_SECTIONS = [
+  { tag: 'deadline', prefix: 'deadlines', cardClass: 'action-card-urgent' },
+  { tag: 'active_thread', prefix: 'active', cardClass: 'action-card-info' },
+  { tag: 'billing', prefix: 'billing', cardClass: 'action-card-billing' },
+  { tag: 'waste', prefix: 'waste', cardClass: 'action-card-waste' },
+];
 
-  if (!items.length) {
+function renderActionItems(items) {
+  CATEGORY_SECTIONS.forEach(({ tag, prefix, cardClass }) => {
+    renderCategoryList(tag, prefix, cardClass, items);
+  });
+}
+
+function renderCategoryList(tag, prefix, cardClass, items) {
+  const container = document.getElementById(`${prefix}-list`);
+  const empty = document.getElementById(`${prefix}-empty`);
+  const count = document.getElementById(`${prefix}-count`);
+  if (!container) return;
+
+  const matches = items
+    .map((item, idx) => ({ item, idx }))
+    .filter(({ item }) => (item.tags || []).includes(tag));
+
+  if (!matches.length) {
     container.innerHTML = '';
     empty.classList.remove('hidden');
     count.textContent = '';
@@ -594,31 +622,33 @@ function renderActionItems(items) {
   }
 
   empty.classList.add('hidden');
-  count.textContent = `${items.length} item${items.length !== 1 ? 's' : ''}`;
+  count.textContent = `${matches.length} item${matches.length !== 1 ? 's' : ''}`;
+  container.innerHTML = matches.map(({ item, idx }) => renderActionCard(item, idx, cardClass)).join('');
+}
 
-  container.innerHTML = items.map((item, idx) => {
-    const priorityClass = item.priority === 'urgent' ? 'action-card-urgent' :
-                          item.priority === 'pending' ? 'action-card-pending' : 'action-card-info';
-    const actions = (item.actions || []).map(a => `<li>${escapeHtml(a)}</li>`).join('');
-    const due = item.dueDate ? `<div class="action-due">📅 ${escapeHtml(item.dueDate)}</div>` : '';
-    const fromName = item.from ? item.from.replace(/<.*>/, '').trim() : 'Unknown';
+function renderActionCard(item, idx, cardClass) {
+  const actions = (item.actions || []).map(a => `<li>${escapeHtml(a)}</li>`).join('');
+  const due = item.dueDate ? `<div class="action-due">📅 ${escapeHtml(item.dueDate)}</div>` : '';
+  const amount = item.amount ? `<div class="action-amount">💰 ${escapeHtml(item.amount)}</div>` : '';
+  const wasteNote = item.wasteReason ? `<div class="action-waste-note">⚠️ ${escapeHtml(item.wasteReason)}</div>` : '';
+  const fromName = item.from ? item.from.replace(/<.*>/, '').trim() : 'Unknown';
 
-    return `
-      <div class="action-card ${priorityClass}">
-        <div class="action-header">
-          <div>
-            <div class="action-subject">${escapeHtml(item.subject)}</div>
-            <div class="action-from">${escapeHtml(fromName)} · ${item.date ? formatRelativeDate(item.date) : ''}</div>
-          </div>
-          <div style="display:flex;gap:6px;">
-            <button class="action-btn action-btn-draft" onclick="openDraftModal(${idx})">Draft Reply</button>
-            <button class="action-btn action-btn-done" onclick="dismissAction(${idx})">Done</button>
-          </div>
+  return `
+    <div class="action-card ${cardClass}">
+      <div class="action-header">
+        <div>
+          <div class="action-subject">${escapeHtml(item.subject)}</div>
+          <div class="action-from">${escapeHtml(fromName)} · ${item.date ? formatRelativeDate(item.date) : ''}</div>
         </div>
-        ${actions ? `<ul class="action-items-list">${actions}</ul>` : ''}
-        ${due}
-      </div>`;
-  }).join('');
+        <div style="display:flex;gap:6px;">
+          <button class="action-btn action-btn-draft" onclick="openDraftModal(${idx})">Draft Reply</button>
+          <button class="action-btn action-btn-done" onclick="dismissAction(${idx})">Done</button>
+        </div>
+      </div>
+      ${actions ? `<ul class="action-items-list">${actions}</ul>` : ''}
+      ${(due || amount) ? `<div style="display:flex;gap:6px;flex-wrap:wrap;">${due}${amount}</div>` : ''}
+      ${wasteNote}
+    </div>`;
 }
 
 function dismissAction(idx) {

@@ -52,23 +52,26 @@ Deno.serve(async (req) => {
       )
       .join("\n\n");
 
-    const prompt = `Analyze these emails and extract actionable items. For each email that needs attention, determine:
-1. Priority: "urgent" (needs reply today, has deadline), "pending" (needs reply soon), or "info" (FYI only)
-2. What specific action is needed
-3. Any due dates mentioned
+    const prompt = `Analyze these emails (all from the last 14 days) and classify each one that deserves my attention into one or more categories:
 
-Skip emails that are clearly promotional, automated, or don't need a response.
-Only include emails where I did NOT send the last message (unless starred).
+- "deadline": has a specific date, deadline, or appointment I need to act on
+- "active_thread": an ongoing conversation I'm actively part of that likely needs a reply or is worth tracking
+- "billing": a receipt, invoice, subscription renewal, or recurring charge notification
+- "waste": add this tag ONLY IF the email is also tagged "billing" AND you notice a signal it might be wasteful spending — a price increase, a subscription that looks unused/forgotten, or an overlapping/duplicate service. Briefly explain why in wasteReason.
+
+Skip emails that are clearly promotional, automated marketing, or don't need any response or awareness.
 
 Return ONLY valid JSON — an array of objects with these fields:
-- threadId (from the email number, I'll map it back)
 - emailIndex (1-based index from the list)
 - subject (string)
 - from (string)
 - date (string)
+- tags (array containing one or more of: "deadline", "active_thread", "billing", "waste")
 - priority ("urgent" | "pending" | "info")
 - actions (array of short action strings)
-- dueDate (string or null)
+- dueDate (string or null — a specific date/deadline mentioned)
+- amount (string or null — dollar amount if this is a billing email, e.g. "$14.99/month")
+- wasteReason (string or null — only if tagged "waste": price increase / looks unused / possible duplicate service)
 
 Emails:
 ${emailList}`;
@@ -106,6 +109,12 @@ ${emailList}`;
         priority: item.priority || "info",
         actions: item.actions || [],
         dueDate: item.dueDate || null,
+        amount: item.amount || null,
+        wasteReason: item.wasteReason || null,
+        tags:
+          Array.isArray(item.tags) && item.tags.length
+            ? item.tags
+            : ["active_thread"],
       };
     });
 
