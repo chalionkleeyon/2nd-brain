@@ -72,29 +72,44 @@
         <p class="m">Use the box above to add something.</p>
       </div>
 
+      <!-- Coming Up (Lookahead) -->
+      <h2 class="section-title"><span class="sq" style="background:var(--green)"></span>Coming Up <span id="lookahead-count" class="count"></span></h2>
+      <p class="section-sub">Travel, weddings, and events in the next 4 weeks worth preparing for.</p>
+      <div id="lookahead-list"></div>
+      <div id="lookahead-empty" class="empty-state-sm">Nothing big on the horizon.</div>
+
       <!-- Inbox Intelligence -->
-      <h2 class="section-title"><span class="sq" style="background:var(--red)"></span>Inbox Intelligence</h2>
-      <p class="section-sub">Analyzed from threads you're active in over the last 30 days.</p>
+      <h2 class="section-title"><span class="sq" style="background:var(--red)"></span>Inbox Intelligence <span id="email-analysis-status" class="count"></span></h2>
+      <p class="section-sub">AI-powered scan of your recent email threads.</p>
+      <button onclick="analyzeInbox()" id="analyze-btn" class="btn-analyze">
+        <svg class="analyze-icon" width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
+        Analyze Inbox
+      </button>
 
-      <!-- Deadlines -->
-      <div class="grp"><span class="grp-icon">&#9200;</span> Deadlines <span id="deadlines-count" class="count"></span></div>
-      <div id="deadlines-list"></div>
-      <div id="deadlines-empty" class="empty-state-sm">Nothing time-sensitive right now.</div>
+      <!-- Deadlines & Action Items -->
+      <div class="grp">&#9200; Deadlines &amp; Action Items <span id="deadlines_actions-count" class="count"></span></div>
+      <div id="deadlines_actions-list"></div>
+      <div id="deadlines_actions-empty" class="empty-state-sm">Nothing time-sensitive right now.</div>
 
-      <!-- Active Threads -->
-      <div class="grp"><span class="grp-icon">&#128172;</span> Active Threads <span id="active-count" class="count"></span></div>
-      <div id="active-list"></div>
-      <div id="active-empty" class="empty-state-sm">No open conversations need a reply.</div>
+      <!-- Money & Billing -->
+      <div class="grp">&#128179; Money &amp; Billing <span id="money_billing-count" class="count"></span></div>
+      <div id="money_billing-list"></div>
+      <div id="money_billing-empty" class="empty-state-sm">No billing activity detected.</div>
 
-      <!-- Recurring Billing -->
-      <div class="grp"><span class="grp-icon">&#128179;</span> Recurring Billing <span id="billing-count" class="count"></span></div>
-      <div id="billing-list"></div>
-      <div id="billing-empty" class="empty-state-sm">No billing activity detected.</div>
+      <!-- Active Conversations -->
+      <div class="grp">&#128172; Active Conversations <span id="active_conversations-count" class="count"></span></div>
+      <div id="active_conversations-list"></div>
+      <div id="active_conversations-empty" class="empty-state-sm">No open conversations need a reply.</div>
 
-      <!-- Possible Waste -->
-      <div class="grp"><span class="grp-icon">&#9888;&#65039;</span> Possible Waste <span id="waste-count" class="count"></span></div>
-      <div id="waste-list"></div>
-      <div id="waste-empty" class="empty-state-sm">Nothing flagged as wasteful spending.</div>
+      <!-- Upcoming Travel & Events -->
+      <div class="grp">&#9992;&#65039; Upcoming Travel &amp; Events <span id="travel_events-count" class="count"></span></div>
+      <div id="travel_events-list"></div>
+      <div id="travel_events-empty" class="empty-state-sm">No upcoming travel detected.</div>
+
+      <!-- Heads Up -->
+      <div class="grp">&#128161; Heads Up <span id="heads_up-count" class="count"></span></div>
+      <div id="heads_up-list"></div>
+      <div id="heads_up-empty" class="empty-state-sm">Nothing flagged for awareness.</div>
 
       <div class="foot">Syncs Gmail &amp; Google Calendar via Supabase edge functions.</div>
     </div>
