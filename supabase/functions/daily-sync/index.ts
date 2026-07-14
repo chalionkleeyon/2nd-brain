@@ -77,18 +77,29 @@ async function fetchCalendarEvents(
 
 async function fetchRecentEmails(token: string): Promise<any[]> {
   const query =
-    'newer_than:14d -category:promotions -category:forums (is:starred OR from:me OR (is:unread to:me) OR subject:(receipt OR invoice OR renewal OR subscription OR billing OR statement))';
-  const res = await fetch(
-    `https://www.googleapis.com/gmail/v1/users/me/threads?q=${encodeURIComponent(query)}&maxResults=30`,
-    { headers: { Authorization: `Bearer ${token}` } }
-  );
-  if (!res.ok) return [];
-  const data = await res.json();
+    'newer_than:30d -category:promotions -category:forums (is:starred OR from:me OR (is:unread to:me) OR subject:(receipt OR invoice OR renewal OR subscription OR billing OR statement))';
+
+  const allThreadIds: string[] = [];
+  let pageToken: string | null = null;
+  let page = 0;
+  while (page < 3) {
+    let url = `https://www.googleapis.com/gmail/v1/users/me/threads?q=${encodeURIComponent(query)}&maxResults=50`;
+    if (pageToken) url += `&pageToken=${encodeURIComponent(pageToken)}`;
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) break;
+    const data = await res.json();
+    for (const t of (data.threads || [])) {
+      allThreadIds.push(t.id);
+    }
+    pageToken = data.nextPageToken;
+    if (!pageToken) break;
+    page++;
+  }
 
   const threads = await Promise.all(
-    (data.threads || []).slice(0, 25).map(async (t: any) => {
+    allThreadIds.slice(0, 50).map(async (id: string) => {
       const res = await fetch(
-        `https://www.googleapis.com/gmail/v1/users/me/threads/${t.id}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=Date`,
+        `https://www.googleapis.com/gmail/v1/users/me/threads/${id}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=Date`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
       if (!res.ok) return null;
@@ -125,14 +136,14 @@ async function processWithGemini(emails: any[]): Promise<any[]> {
     )
     .join("\n\n");
 
-  const prompt = `Analyze these emails (last 14 days) and classify each one that deserves attention into one or more tags: "deadline" (specific date/deadline to act on), "active_thread" (ongoing conversation needing a reply), "billing" (receipt/invoice/subscription renewal), "waste" (only alongside "billing", when there's a price increase, unused subscription, or duplicate service signal — explain briefly in wasteReason). Skip promotional/automated marketing emails.\n\nReturn ONLY a JSON array of objects with: emailIndex (1-based), subject, from, date, tags (string[]), priority ("urgent"|"pending"|"info"), actions (string[]), dueDate (string|null), amount (string|null, e.g. "$14.99/month"), wasteReason (string|null).\n\nEmails:\n${emailList}`;
+  const prompt = `Analyze these emails (last 30 days) and classify each one that deserves attention into one or more tags: "deadline" (specific date/deadline to act on), "active_thread" (ongoing conversation needing a reply), "billing" (receipt/invoice/subscription renewal), "waste" (only alongside "billing", when there's a price increase, unused subscription, or duplicate service signal — explain briefly in wasteReason). Skip promotional/automated marketing emails.\n\nReturn ONLY a JSON array of objects with: emailIndex (1-based), subject, from, date, tags (string[]), priority ("urgent"|"pending"|"info"), actions (string[]), dueDate (string|null), amount (string|null, e.g. "$14.99/month"), wasteReason (string|null).\n\nEmails:\n${emailList}`;
 
   const res = await fetch(GEMINI_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { maxOutputTokens: 2000, temperature: 0.2 },
+      generationConfig: { maxOutputTokens: 4000, temperature: 0.2 },
     }),
   });
 

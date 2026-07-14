@@ -52,7 +52,7 @@ Deno.serve(async (req) => {
       )
       .join("\n\n");
 
-    const prompt = `Analyze these emails (all from the last 14 days) and classify each one that deserves my attention into one or more categories:
+    const prompt = `Analyze these emails (all from the last 30 days) and classify each one that deserves my attention into one or more categories:
 
 - "deadline": has a specific date, deadline, or appointment I need to act on
 - "active_thread": an ongoing conversation I'm actively part of that likely needs a reply or is worth tracking
@@ -83,7 +83,7 @@ ${emailList}`;
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { maxOutputTokens: 2000, temperature: 0.2 },
+        generationConfig: { maxOutputTokens: 4000, temperature: 0.2 },
       }),
     });
 
