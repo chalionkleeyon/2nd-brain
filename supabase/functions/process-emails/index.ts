@@ -52,26 +52,28 @@ Deno.serve(async (req) => {
       )
       .join("\n\n");
 
-    const prompt = `Analyze these emails (all from the last 30 days) and classify each one that deserves my attention into one or more categories:
+    const prompt = `You are a personal email intelligence assistant. Analyze these emails (all from the last 30 days) and classify each one that deserves attention into exactly ONE primary category:
 
-- "deadline": has a specific date, deadline, or appointment I need to act on
-- "active_thread": an ongoing conversation I'm actively part of that likely needs a reply or is worth tracking
-- "billing": a receipt, invoice, subscription renewal, or recurring charge notification
-- "waste": add this tag ONLY IF the email is also tagged "billing" AND you notice a signal it might be wasteful spending — a price increase, a subscription that looks unused/forgotten, or an overlapping/duplicate service. Briefly explain why in wasteReason.
+- "deadlines_actions": has a specific deadline, due date, appointment, required action, or time-sensitive task. Includes RSVPs, form submissions, renewals with deadlines, appointments to confirm.
+- "money_billing": a receipt, invoice, subscription renewal, recurring charge, payment confirmation, refund, or any financial transaction. If you notice wasteful spending (price increase, unused/forgotten subscription, duplicate service), add a wasteReason.
+- "active_conversations": an ongoing back-and-forth conversation from the past 7 days where I'm actively involved and likely need to reply or follow up. Skip old threads with no recent activity.
+- "travel_events": relates to upcoming travel, flights, hotel bookings, Airbnb confirmations, event tickets, conference registrations, or wedding invitations.
+- "heads_up": important information I should be aware of but doesn't require immediate action — policy changes, account updates, shipping notifications, important announcements.
 
-Skip emails that are clearly promotional, automated marketing, or don't need any response or awareness.
+Skip emails that are clearly promotional, automated marketing, social media notifications, newsletters I didn't engage with, or don't need any response or awareness.
 
 Return ONLY valid JSON — an array of objects with these fields:
 - emailIndex (1-based index from the list)
 - subject (string)
 - from (string)
 - date (string)
-- tags (array containing one or more of: "deadline", "active_thread", "billing", "waste")
+- tags (array with exactly ONE tag from: "deadlines_actions", "money_billing", "active_conversations", "travel_events", "heads_up")
 - priority ("urgent" | "pending" | "info")
-- actions (array of short action strings)
-- dueDate (string or null — a specific date/deadline mentioned)
-- amount (string or null — dollar amount if this is a billing email, e.g. "$14.99/month")
-- wasteReason (string or null — only if tagged "waste": price increase / looks unused / possible duplicate service)
+- actions (array of 1-2 short action strings describing what I should do)
+- dueDate (string or null — a specific date/deadline if applicable)
+- amount (string or null — dollar amount for billing emails, e.g. "$14.99/month")
+- wasteReason (string or null — only for money_billing: why this might be wasteful spending)
+- travelDate (string or null — only for travel_events: the travel/event date)
 
 Emails:
 ${emailList}`;
@@ -83,7 +85,7 @@ ${emailList}`;
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { maxOutputTokens: 4000, temperature: 0.2 },
+        generationConfig: { maxOutputTokens: 8000, temperature: 0.2 },
       }),
     });
 
@@ -128,10 +130,11 @@ ${emailList}`;
         dueDate: item.dueDate || null,
         amount: item.amount || null,
         wasteReason: item.wasteReason || null,
+        travelDate: item.travelDate || null,
         tags:
           Array.isArray(item.tags) && item.tags.length
             ? item.tags
-            : ["active_thread"],
+            : ["heads_up"],
       };
     });
 

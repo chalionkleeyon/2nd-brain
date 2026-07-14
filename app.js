@@ -6,6 +6,7 @@ const EMAIL_LOOKBACK_DAYS = 30;
 const MAX_THREADS_PER_QUERY = 50;
 const MAX_THREADS_TOTAL = 75;
 const MAX_PAGES_PER_QUERY = 3;
+const LOOKAHEAD_DAYS = 28;
 
 const GOOGLE_SCOPES = [
   'https://www.googleapis.com/auth/gmail.readonly',
@@ -36,6 +37,16 @@ const CALENDAR_NAMES = {
   'en.usa#holiday@group.v.calendar.google.com': 'Holidays',
 };
 
+const LOOKAHEAD_KEYWORDS = /travel|trip|flight|hotel|airbnb|wedding|vacation|cruise|resort|conference|retreat|reunion|graduation|ceremony|festival|concert|gala/i;
+
+const CATEGORY_SECTIONS = [
+  { tag: 'deadlines_actions', prefix: 'deadlines_actions', cardClass: 'action-card-urgent' },
+  { tag: 'money_billing', prefix: 'money_billing', cardClass: 'action-card-billing' },
+  { tag: 'active_conversations', prefix: 'active_conversations', cardClass: 'action-card-info' },
+  { tag: 'travel_events', prefix: 'travel_events', cardClass: 'action-card-travel' },
+  { tag: 'heads_up', prefix: 'heads_up', cardClass: 'action-card-headsup' },
+];
+
 // ─── State ──────────────────────────────────────────────────────────────────
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 let state = {
@@ -44,7 +55,9 @@ let state = {
   selectedDate: new Date(),
   events: [],
   actionItems: [],
+  lookaheadEvents: [],
   syncing: false,
+  analyzing: false,
   lastSync: null,
   draftContext: null,
 };
@@ -87,7 +100,7 @@ async function signInWithGoogle() {
 
 async function signOut() {
   await sb.auth.signOut();
-  state = { ...state, user: null, providerToken: null, events: [], actionItems: [] };
+  state = { ...state, user: null, providerToken: null, events: [], actionItems: [], lookaheadEvents: [] };
   showAuth();
 }
 
@@ -126,30 +139,22 @@ async function getToken() {
 
 async function googleFetch(url, options = {}) {
   const token = await getToken();
-  if (!token) {
-    console.error('googleFetch: no token available');
-    return null;
-  }
+  if (!token) return null;
   const res = await fetch(url, {
     ...options,
     headers: { Authorization: `Bearer ${token}`, ...options.headers },
   });
   if (res.status === 401) {
-    console.warn('googleFetch: got 401, attempting token refresh...');
     state.providerToken = null;
     const { data: { session }, error } = await sb.auth.refreshSession();
-    if (error) {
-      console.error('googleFetch: refreshSession error:', error.message);
-    }
+    if (error) console.error('googleFetch: refreshSession error:', error.message);
     if (session?.provider_token) {
-      console.log('googleFetch: token refreshed successfully');
       state.providerToken = session.provider_token;
       return fetch(url, {
         ...options,
         headers: { Authorization: `Bearer ${session.provider_token}`, ...options.headers },
       });
     }
-    console.error('googleFetch: refreshSession returned no provider_token — user must re-authenticate');
     showToast('Google session expired. Please sign out and sign in again.', 'error');
     return null;
   }
@@ -181,6 +186,50 @@ async function fetchCalendarEvents(date) {
 
   const results = await Promise.all(promises);
   return results.flat();
+}
+
+async function fetchCalendarLookahead() {
+  const start = new Date();
+  start.setDate(start.getDate() + 1);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date();
+  end.setDate(end.getDate() + LOOKAHEAD_DAYS);
+  end.setHours(23, 59, 59, 999);
+
+  const promises = CALENDAR_IDS.filter(id => !id.includes('holiday')).map(async (calId) => {
+    const params = new URLSearchParams({
+      timeMin: start.toISOString(),
+      timeMax: end.toISOString(),
+      singleEvents: 'true',
+      orderBy: 'startTime',
+      maxResults: '100',
+    });
+    const res = await googleFetch(
+      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calId)}/events?${params}`
+    );
+    if (!res || !res.ok) return [];
+    const data = await res.json();
+    return (data.items || []).map(e => ({ ...e, _calendarId: calId }));
+  });
+
+  const results = (await Promise.all(promises)).flat();
+
+  return results.filter(e => {
+    const summary = (e.summary || '').toLowerCase();
+    const description = (e.description || '').toLowerCase();
+    const text = summary + ' ' + description;
+    if (LOOKAHEAD_KEYWORDS.test(text)) return true;
+    if (e.start?.date && e.end?.date) {
+      const s = new Date(e.start.date);
+      const en = new Date(e.end.date);
+      if ((en - s) / 86400000 >= 2) return true;
+    }
+    return false;
+  }).sort((a, b) => {
+    const aTime = a.start?.dateTime || a.start?.date || '';
+    const bTime = b.start?.dateTime || b.start?.date || '';
+    return new Date(aTime) - new Date(bTime);
+  });
 }
 
 function sortEvents(events) {
@@ -225,15 +274,7 @@ async function fetchThreadPage(query) {
     if (pageToken) url += `&pageToken=${encodeURIComponent(pageToken)}`;
 
     const res = await googleFetch(url);
-    if (!res) {
-      console.error('fetchThreadPage: googleFetch returned null (auth failure) for query:', query.substring(0, 60));
-      break;
-    }
-    if (!res.ok) {
-      const errText = await res.text().catch(() => '');
-      console.error(`fetchThreadPage: Gmail API ${res.status} for query:`, query.substring(0, 60), errText.substring(0, 200));
-      break;
-    }
+    if (!res || !res.ok) break;
     const data = await res.json();
 
     for (const t of (data.threads || [])) {
@@ -272,7 +313,7 @@ async function fetchActionableEmails() {
     }
   }
 
-  console.log(`fetchActionableEmails: ${allThreadIds.length} unique threads from ${queries.length} queries (${queryFailures} returned 0 results)`);
+  console.log(`fetchActionableEmails: ${allThreadIds.length} unique threads from ${queries.length} queries`);
 
   if (allThreadIds.length === 0 && queryFailures === queries.length) {
     showToast('Gmail returned no threads — token may be expired. Try signing out and back in.', 'error');
@@ -347,30 +388,26 @@ function decodeEmailBody(payload) {
   return '';
 }
 
-// ─── Claude Processing (via Supabase Edge Functions) ────────────────────────
-async function processEmailsWithClaude(emails) {
-  if (!emails.length) {
-    console.log('processEmailsWithClaude: no emails to process');
-    return [];
-  }
+// ─── Email Processing (via Supabase Edge Function) ──────────────────────────
+async function processEmailsWithGemini(emails) {
+  if (!emails.length) return [];
 
   let session;
   const { data } = await sb.auth.getSession();
   session = data?.session;
 
   if (!session) {
-    console.warn('processEmailsWithClaude: getSession returned null, trying refreshSession...');
     const { data: refreshData, error } = await sb.auth.refreshSession();
-    if (error) console.error('processEmailsWithClaude: refreshSession error:', error.message);
+    if (error) console.error('processEmails: refreshSession error:', error.message);
     session = refreshData?.session;
   }
 
   if (!session) {
-    console.error('processEmailsWithClaude: no valid session after refresh — falling back to local processing');
+    console.error('processEmails: no valid session — falling back to local processing');
     return fallbackProcessing(emails);
   }
 
-  console.log(`processEmailsWithClaude: sending ${emails.length} emails to edge function`);
+  console.log(`processEmails: sending ${emails.length} emails to edge function`);
 
   const emailSummaries = emails.map(e => ({
     subject: e.subject,
@@ -398,13 +435,20 @@ async function processEmailsWithClaude(emails) {
 }
 
 const BILLING_REGEX = /invoice|receipt|renewal|subscription|payment|billing|statement|auto-renew/i;
+const TRAVEL_REGEX = /travel|trip|flight|hotel|airbnb|wedding|vacation|cruise|conference/i;
 
 function fallbackProcessing(emails) {
   return emails
     .filter(e => !e.iSentLast || e.isStarred || BILLING_REGEX.test(e.subject))
     .map(e => {
       const isBilling = BILLING_REGEX.test(e.subject);
-      const tags = isBilling ? ['billing'] : e.isStarred ? ['deadline'] : ['active_thread'];
+      const isTravel = TRAVEL_REGEX.test(e.subject);
+      let tag = 'heads_up';
+      if (e.isStarred) tag = 'deadlines_actions';
+      else if (isBilling) tag = 'money_billing';
+      else if (isTravel) tag = 'travel_events';
+      else if (!e.iSentLast) tag = 'active_conversations';
+
       return {
         threadId: e.threadId,
         messageId: e.messageId,
@@ -416,7 +460,8 @@ function fallbackProcessing(emails) {
         dueDate: null,
         amount: null,
         wasteReason: null,
-        tags,
+        travelDate: null,
+        tags: [tag],
       };
     });
 }
@@ -438,7 +483,7 @@ async function generateDraftReply(emailContext) {
   return res.json();
 }
 
-// ─── Sync ───────────────────────────────────────────────────────────────────
+// ─── Sync (Calendar Only) ───────────────────────────────────────────────────
 async function fullSync() {
   if (state.syncing) return;
   state.syncing = true;
@@ -446,29 +491,60 @@ async function fullSync() {
   btn.classList.add('sync-spinning');
 
   try {
-    const [events, threads] = await Promise.all([
+    const [events, lookahead] = await Promise.all([
       fetchCalendarEvents(state.selectedDate),
-      fetchActionableEmails(),
+      fetchCalendarLookahead(),
     ]);
 
     state.events = sortEvents(events);
+    state.lookaheadEvents = lookahead;
     renderTimeline(state.events);
-
-    const emailMetas = threads.map(extractEmailMeta).filter(Boolean);
-    const actionItems = await processEmailsWithClaude(emailMetas);
-    state.actionItems = Array.isArray(actionItems) ? actionItems : [];
-    renderActionItems(state.actionItems);
+    renderLookahead(state.lookaheadEvents);
 
     state.lastSync = new Date();
     updateSyncStatus();
     cacheData();
-    showToast('Synced', 'success');
+    showToast('Calendar synced', 'success');
   } catch (err) {
     console.error('Sync failed:', err);
     showToast('Sync failed — check console', 'error');
   } finally {
     state.syncing = false;
     btn.classList.remove('sync-spinning');
+  }
+}
+
+// ─── Analyze Inbox (On-Demand) ──────────────────────────────────────────────
+async function analyzeInbox() {
+  if (state.analyzing) return;
+  state.analyzing = true;
+  const btn = document.getElementById('analyze-btn');
+  const statusEl = document.getElementById('email-analysis-status');
+  btn.classList.add('analyze-spinning');
+  btn.disabled = true;
+  statusEl.textContent = 'Fetching emails...';
+
+  try {
+    const threads = await fetchActionableEmails();
+    const emailMetas = threads.map(extractEmailMeta).filter(Boolean);
+    statusEl.textContent = `Analyzing ${emailMetas.length} threads...`;
+
+    const actionItems = await processEmailsWithGemini(emailMetas);
+    state.actionItems = Array.isArray(actionItems) ? actionItems : [];
+    renderActionItems(state.actionItems);
+
+    const count = state.actionItems.length;
+    statusEl.textContent = count ? `${count} item${count !== 1 ? 's' : ''} found` : '';
+    showToast(`Inbox analyzed — ${count} items`, 'success');
+    cacheData();
+  } catch (err) {
+    console.error('Inbox analysis failed:', err);
+    showToast('Inbox analysis failed', 'error');
+    statusEl.textContent = 'Analysis failed';
+  } finally {
+    state.analyzing = false;
+    btn.classList.remove('analyze-spinning');
+    btn.disabled = false;
   }
 }
 
@@ -573,11 +649,7 @@ function parseQuickAdd(text) {
     .replace(/\s+/g, ' ')
     .trim() || text;
 
-  return {
-    summary,
-    start: start.toISOString(),
-    end: end.toISOString(),
-  };
+  return { summary, start: start.toISOString(), end: end.toISOString() };
 }
 
 // ─── Render: Timeline ───────────────────────────────────────────────────────
@@ -651,7 +723,8 @@ function renderEventCard(event, isPast) {
   if (isPast) classes.push('event-past');
   if (isNow) classes.push('event-now');
 
-  const location = event.location ? `<span>📍 ${escapeHtml(event.location)}</span>` : '';
+  const location = event.location ? `<span class="event-loc-text">${escapeHtml(event.location)}</span>` : '';
+  const desc = event.description ? `<div class="event-description">${escapeHtml(event.description.substring(0, 80))}${event.description.length > 80 ? '...' : ''}</div>` : '';
 
   return `
     <div class="${classes.join(' ')}">
@@ -659,6 +732,7 @@ function renderEventCard(event, isPast) {
       <div class="event-time">${isAllDay ? '<span class="all-day-badge">ALL DAY</span>' : timeStr}</div>
       <div class="event-body">
         <div class="event-title">${escapeHtml(event.summary || '(No title)')}</div>
+        ${desc}
         <div class="event-meta">
           <span>${calName}</span>
           ${location}
@@ -674,14 +748,66 @@ function isEventNow(event) {
   return now >= start && now <= end;
 }
 
-// ─── Render: Inbox Intelligence ─────────────────────────────────────────────
-const CATEGORY_SECTIONS = [
-  { tag: 'deadline', prefix: 'deadlines', cardClass: 'action-card-urgent' },
-  { tag: 'active_thread', prefix: 'active', cardClass: 'action-card-info' },
-  { tag: 'billing', prefix: 'billing', cardClass: 'action-card-billing' },
-  { tag: 'waste', prefix: 'waste', cardClass: 'action-card-waste' },
-];
+// ─── Render: Lookahead ──────────────────────────────────────────────────────
+function renderLookahead(events) {
+  const container = document.getElementById('lookahead-list');
+  const empty = document.getElementById('lookahead-empty');
+  const count = document.getElementById('lookahead-count');
 
+  if (!events || !events.length) {
+    container.innerHTML = '';
+    empty.classList.remove('hidden');
+    count.textContent = '';
+    return;
+  }
+
+  empty.classList.add('hidden');
+  count.textContent = `${events.length} event${events.length !== 1 ? 's' : ''}`;
+
+  container.innerHTML = events.map((e, i) => {
+    const eventDate = new Date(e.start?.dateTime || e.start?.date);
+    const now = new Date();
+    const daysAway = Math.ceil((eventDate - now) / 86400000);
+    const calColor = CALENDAR_COLORS[e._calendarId] || '#6c5ce7';
+    const calName = CALENDAR_NAMES[e._calendarId] || 'Calendar';
+    const dateStr = eventDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+
+    let duration = '';
+    if (e.start?.date && e.end?.date) {
+      const days = Math.round((new Date(e.end.date) - new Date(e.start.date)) / 86400000);
+      if (days > 1) duration = `<span class="lookahead-duration">${days} days</span>`;
+    }
+
+    const location = e.location ? `<div class="lookahead-location">${escapeHtml(e.location)}</div>` : '';
+    const noteKey = `lookahead-note-${e.id || i}`;
+    const savedNote = localStorage.getItem(noteKey) || '';
+
+    return `
+      <div class="lookahead-card">
+        <div class="lookahead-countdown">${daysAway <= 0 ? 'Today' : `in ${daysAway}d`}</div>
+        <div class="lookahead-body">
+          <div class="lookahead-title">${escapeHtml(e.summary || '(No title)')}</div>
+          <div class="lookahead-meta">
+            <span class="lookahead-date">${dateStr}</span>
+            <span class="lookahead-cal" style="color:${calColor}">${calName}</span>
+            ${duration}
+          </div>
+          ${location}
+          <input type="text" class="lookahead-note-input" placeholder="Prep notes..." value="${escapeHtml(savedNote)}" onchange="saveLookaheadNote('${noteKey}', this.value)">
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function saveLookaheadNote(key, value) {
+  if (value.trim()) {
+    localStorage.setItem(key, value.trim());
+  } else {
+    localStorage.removeItem(key);
+  }
+}
+
+// ─── Render: Inbox Intelligence ─────────────────────────────────────────────
 function renderActionItems(items) {
   CATEGORY_SECTIONS.forEach(({ tag, prefix, cardClass }) => {
     renderCategoryList(tag, prefix, cardClass, items);
@@ -700,21 +826,22 @@ function renderCategoryList(tag, prefix, cardClass, items) {
 
   if (!matches.length) {
     container.innerHTML = '';
-    empty.classList.remove('hidden');
-    count.textContent = '';
+    if (empty) empty.classList.remove('hidden');
+    if (count) count.textContent = '';
     return;
   }
 
-  empty.classList.add('hidden');
-  count.textContent = `${matches.length} item${matches.length !== 1 ? 's' : ''}`;
+  if (empty) empty.classList.add('hidden');
+  if (count) count.textContent = `${matches.length} item${matches.length !== 1 ? 's' : ''}`;
   container.innerHTML = matches.map(({ item, idx }) => renderActionCard(item, idx, cardClass)).join('');
 }
 
 function renderActionCard(item, idx, cardClass) {
   const actions = (item.actions || []).map(a => `<li>${escapeHtml(a)}</li>`).join('');
-  const due = item.dueDate ? `<div class="action-due">📅 ${escapeHtml(item.dueDate)}</div>` : '';
-  const amount = item.amount ? `<div class="action-amount">💰 ${escapeHtml(item.amount)}</div>` : '';
-  const wasteNote = item.wasteReason ? `<div class="action-waste-note">⚠️ ${escapeHtml(item.wasteReason)}</div>` : '';
+  const due = item.dueDate ? `<div class="action-due">${escapeHtml(item.dueDate)}</div>` : '';
+  const amount = item.amount ? `<div class="action-amount">${escapeHtml(item.amount)}</div>` : '';
+  const wasteNote = item.wasteReason ? `<div class="action-waste-note">${escapeHtml(item.wasteReason)}</div>` : '';
+  const travelDate = item.travelDate ? `<div class="action-travel-date">${escapeHtml(item.travelDate)}</div>` : '';
   const fromName = item.from ? item.from.replace(/<.*>/, '').trim() : 'Unknown';
 
   return `
@@ -730,7 +857,7 @@ function renderActionCard(item, idx, cardClass) {
         </div>
       </div>
       ${actions ? `<ul class="action-items-list">${actions}</ul>` : ''}
-      ${(due || amount) ? `<div style="display:flex;gap:6px;flex-wrap:wrap;">${due}${amount}</div>` : ''}
+      ${(due || amount || travelDate) ? `<div style="display:flex;gap:6px;flex-wrap:wrap;">${due}${amount}${travelDate}</div>` : ''}
       ${wasteNote}
     </div>`;
 }

@@ -136,14 +136,35 @@ async function processWithGemini(emails: any[]): Promise<any[]> {
     )
     .join("\n\n");
 
-  const prompt = `Analyze these emails (last 30 days) and classify each one that deserves attention into one or more tags: "deadline" (specific date/deadline to act on), "active_thread" (ongoing conversation needing a reply), "billing" (receipt/invoice/subscription renewal), "waste" (only alongside "billing", when there's a price increase, unused subscription, or duplicate service signal — explain briefly in wasteReason). Skip promotional/automated marketing emails.\n\nReturn ONLY a JSON array of objects with: emailIndex (1-based), subject, from, date, tags (string[]), priority ("urgent"|"pending"|"info"), actions (string[]), dueDate (string|null), amount (string|null, e.g. "$14.99/month"), wasteReason (string|null).\n\nEmails:\n${emailList}`;
+  const prompt = `You are a personal email intelligence assistant. Analyze these emails (all from the last 30 days) and classify each one that deserves attention into exactly ONE primary category:
+
+- "deadlines_actions": has a specific deadline, due date, appointment, required action, or time-sensitive task.
+- "money_billing": a receipt, invoice, subscription renewal, recurring charge, payment confirmation, refund, or any financial transaction. If you notice wasteful spending, add a wasteReason.
+- "active_conversations": an ongoing conversation from the past 7 days where I'm actively involved and likely need to reply.
+- "travel_events": relates to upcoming travel, flights, hotel bookings, event tickets, conference registrations, or wedding invitations.
+- "heads_up": important information I should be aware of but doesn't require immediate action.
+
+Skip promotional, automated marketing, social media notifications, and newsletters.
+
+Return ONLY valid JSON — an array of objects with:
+- emailIndex (1-based), subject, from, date
+- tags (array with exactly ONE tag from: "deadlines_actions", "money_billing", "active_conversations", "travel_events", "heads_up")
+- priority ("urgent" | "pending" | "info")
+- actions (array of 1-2 short action strings)
+- dueDate (string or null)
+- amount (string or null, e.g. "$14.99/month")
+- wasteReason (string or null — only for money_billing)
+- travelDate (string or null — only for travel_events)
+
+Emails:
+${emailList}`;
 
   const res = await fetch(GEMINI_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { maxOutputTokens: 4000, temperature: 0.2 },
+      generationConfig: { maxOutputTokens: 8000, temperature: 0.2 },
     }),
   });
 
@@ -166,10 +187,11 @@ async function processWithGemini(emails: any[]): Promise<any[]> {
         dueDate: item.dueDate || null,
         amount: item.amount || null,
         wasteReason: item.wasteReason || null,
+        travelDate: item.travelDate || null,
         tags:
           Array.isArray(item.tags) && item.tags.length
             ? item.tags
-            : ["active_thread"],
+            : ["heads_up"],
       };
     });
   } catch {
