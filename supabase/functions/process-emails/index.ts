@@ -76,6 +76,8 @@ Return ONLY valid JSON — an array of objects with these fields:
 Emails:
 ${emailList}`;
 
+    console.log(`process-emails: received ${emails.length} candidate emails`);
+
     const response = await fetch(GEMINI_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -86,16 +88,31 @@ ${emailList}`;
     });
 
     const geminiData = await response.json();
+
+    if (!response.ok) {
+      console.error(
+        `process-emails: Gemini API returned ${response.status}:`,
+        JSON.stringify(geminiData).slice(0, 1000)
+      );
+    }
+
     const text =
       geminiData.candidates?.[0]?.content?.parts?.[0]?.text || "[]";
+
+    console.log(
+      `process-emails: Gemini raw text (first 500 chars): ${text.slice(0, 500)}`
+    );
 
     let parsed;
     try {
       const jsonMatch = text.match(/\[[\s\S]*\]/);
       parsed = JSON.parse(jsonMatch ? jsonMatch[0] : "[]");
-    } catch {
+    } catch (parseErr) {
+      console.error("process-emails: failed to parse Gemini JSON:", parseErr);
       parsed = [];
     }
+
+    console.log(`process-emails: parsed ${parsed.length} action items`);
 
     const result = parsed.map((item: any) => {
       const idx = (item.emailIndex || 1) - 1;
