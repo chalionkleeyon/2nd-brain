@@ -349,8 +349,28 @@ function decodeEmailBody(payload) {
 
 // ─── Claude Processing (via Supabase Edge Functions) ────────────────────────
 async function processEmailsWithClaude(emails) {
-  const { data: { session } } = await sb.auth.getSession();
-  if (!session) return [];
+  if (!emails.length) {
+    console.log('processEmailsWithClaude: no emails to process');
+    return [];
+  }
+
+  let session;
+  const { data } = await sb.auth.getSession();
+  session = data?.session;
+
+  if (!session) {
+    console.warn('processEmailsWithClaude: getSession returned null, trying refreshSession...');
+    const { data: refreshData, error } = await sb.auth.refreshSession();
+    if (error) console.error('processEmailsWithClaude: refreshSession error:', error.message);
+    session = refreshData?.session;
+  }
+
+  if (!session) {
+    console.error('processEmailsWithClaude: no valid session after refresh — falling back to local processing');
+    return fallbackProcessing(emails);
+  }
+
+  console.log(`processEmailsWithClaude: sending ${emails.length} emails to edge function`);
 
   const emailSummaries = emails.map(e => ({
     subject: e.subject,
