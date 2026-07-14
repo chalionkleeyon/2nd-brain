@@ -126,22 +126,31 @@ async function getToken() {
 
 async function googleFetch(url, options = {}) {
   const token = await getToken();
-  if (!token) return null;
+  if (!token) {
+    console.error('googleFetch: no token available');
+    return null;
+  }
   const res = await fetch(url, {
     ...options,
     headers: { Authorization: `Bearer ${token}`, ...options.headers },
   });
   if (res.status === 401) {
+    console.warn('googleFetch: got 401, attempting token refresh...');
     state.providerToken = null;
-    const { data: { session } } = await sb.auth.refreshSession();
+    const { data: { session }, error } = await sb.auth.refreshSession();
+    if (error) {
+      console.error('googleFetch: refreshSession error:', error.message);
+    }
     if (session?.provider_token) {
+      console.log('googleFetch: token refreshed successfully');
       state.providerToken = session.provider_token;
       return fetch(url, {
         ...options,
         headers: { Authorization: `Bearer ${session.provider_token}`, ...options.headers },
       });
     }
-    showToast('Google session expired. Please sign in again.', 'error');
+    console.error('googleFetch: refreshSession returned no provider_token — user must re-authenticate');
+    showToast('Google session expired. Please sign out and sign in again.', 'error');
     return null;
   }
   return res;
@@ -216,7 +225,15 @@ async function fetchThreadPage(query) {
     if (pageToken) url += `&pageToken=${encodeURIComponent(pageToken)}`;
 
     const res = await googleFetch(url);
-    if (!res || !res.ok) break;
+    if (!res) {
+      console.error('fetchThreadPage: googleFetch returned null (auth failure) for query:', query.substring(0, 60));
+      break;
+    }
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      console.error(`fetchThreadPage: Gmail API ${res.status} for query:`, query.substring(0, 60), errText.substring(0, 200));
+      break;
+    }
     const data = await res.json();
 
     for (const t of (data.threads || [])) {
@@ -242,15 +259,24 @@ async function fetchActionableEmails() {
 
   const threadIdSet = new Set();
   const allThreadIds = [];
+  let queryFailures = 0;
 
   for (const q of queries) {
     const ids = await fetchThreadPage(q);
+    if (ids.length === 0) queryFailures++;
     for (const id of ids) {
       if (!threadIdSet.has(id)) {
         threadIdSet.add(id);
         allThreadIds.push(id);
       }
     }
+  }
+
+  console.log(`fetchActionableEmails: ${allThreadIds.length} unique threads from ${queries.length} queries (${queryFailures} returned 0 results)`);
+
+  if (allThreadIds.length === 0 && queryFailures === queries.length) {
+    showToast('Gmail returned no threads — token may be expired. Try signing out and back in.', 'error');
+    return [];
   }
 
   const toFetch = allThreadIds.slice(0, MAX_THREADS_TOTAL);
