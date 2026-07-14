@@ -2,6 +2,11 @@
 const SUPABASE_URL = 'https://ntpmkzrnpfrcrniyfhdu.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im50cG1renJucGZyY3JuaXlmaGR1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM2OTM1NDEsImV4cCI6MjA5OTI2OTU0MX0.rhuW-lbbW2ofAazcShtXmPsD6n6r7gKQdZbdbt85Vxc';
 
+const EMAIL_LOOKBACK_DAYS = 30;
+const MAX_THREADS_PER_QUERY = 50;
+const MAX_THREADS_TOTAL = 75;
+const MAX_PAGES_PER_QUERY = 3;
+
 const GOOGLE_SCOPES = [
   'https://www.googleapis.com/auth/gmail.readonly',
   'https://www.googleapis.com/auth/gmail.send',
@@ -90,11 +95,20 @@ function showDashboard() {
   document.getElementById('auth-screen').classList.add('hidden');
   document.getElementById('dashboard').classList.remove('hidden');
   renderDateNav();
+  updateHeaderSubtitle();
 }
 
 function showAuth() {
   document.getElementById('auth-screen').classList.remove('hidden');
   document.getElementById('dashboard').classList.add('hidden');
+}
+
+function updateHeaderSubtitle() {
+  const el = document.getElementById('header-subtitle');
+  if (!el) return;
+  const now = new Date();
+  const day = now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+  el.textContent = day;
 }
 
 // ─── Token Management ───────────────────────────────────────────────────────
@@ -192,35 +206,59 @@ async function createCalendarEvent(summary, startTime, endTime) {
 }
 
 // ─── Gmail ──────────────────────────────────────────────────────────────────
+async function fetchThreadPage(query) {
+  const threadIds = [];
+  let pageToken = null;
+  let page = 0;
+
+  while (page < MAX_PAGES_PER_QUERY) {
+    let url = `https://www.googleapis.com/gmail/v1/users/me/threads?q=${encodeURIComponent(query)}&maxResults=${MAX_THREADS_PER_QUERY}`;
+    if (pageToken) url += `&pageToken=${encodeURIComponent(pageToken)}`;
+
+    const res = await googleFetch(url);
+    if (!res || !res.ok) break;
+    const data = await res.json();
+
+    for (const t of (data.threads || [])) {
+      threadIds.push(t.id);
+    }
+
+    pageToken = data.nextPageToken;
+    if (!pageToken) break;
+    page++;
+  }
+
+  return threadIds;
+}
+
 async function fetchActionableEmails() {
+  const lookback = `newer_than:${EMAIL_LOOKBACK_DAYS}d`;
   const queries = [
-    'newer_than:14d is:starred',
-    'newer_than:14d from:me -category:promotions -category:forums',
-    'newer_than:14d -category:promotions -category:forums is:unread to:me',
-    'newer_than:14d (subject:(receipt OR invoice OR renewal OR subscription OR "payment confirmation" OR "auto-renew" OR statement OR billing) OR label:Receipts)',
+    `${lookback} is:starred`,
+    `${lookback} from:me -category:promotions -category:forums`,
+    `${lookback} -category:promotions -category:forums is:unread to:me`,
+    `${lookback} (subject:(receipt OR invoice OR renewal OR subscription OR "payment confirmation" OR "auto-renew" OR statement OR billing) OR label:Receipts)`,
   ];
 
-  const threadIds = new Set();
-  const threads = [];
+  const threadIdSet = new Set();
+  const allThreadIds = [];
 
   for (const q of queries) {
-    const res = await googleFetch(
-      `https://www.googleapis.com/gmail/v1/users/me/threads?q=${encodeURIComponent(q)}&maxResults=25`
-    );
-    if (!res || !res.ok) continue;
-    const data = await res.json();
-    for (const t of (data.threads || [])) {
-      if (!threadIds.has(t.id)) {
-        threadIds.add(t.id);
-        threads.push(t);
+    const ids = await fetchThreadPage(q);
+    for (const id of ids) {
+      if (!threadIdSet.has(id)) {
+        threadIdSet.add(id);
+        allThreadIds.push(id);
       }
     }
   }
 
+  const toFetch = allThreadIds.slice(0, MAX_THREADS_TOTAL);
+
   const detailed = await Promise.all(
-    threads.slice(0, 35).map(async (t) => {
+    toFetch.map(async (threadId) => {
       const res = await googleFetch(
-        `https://www.googleapis.com/gmail/v1/users/me/threads/${t.id}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Date`
+        `https://www.googleapis.com/gmail/v1/users/me/threads/${threadId}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Date`
       );
       if (!res || !res.ok) return null;
       return res.json();
